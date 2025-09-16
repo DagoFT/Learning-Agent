@@ -402,6 +402,8 @@ model Course {
   // Relación con documentos para el contrato
   documents     Document[]
 
+  quizQuestions QuizQuestion[]
+
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 }
@@ -418,7 +420,6 @@ model Classes {
   enrollment    Enrollment[]
   attendance Attendance[]
 
-  quizQuestions    QuizQuestion[]
   interviewQuestions InterviewQuestion[]
 
 
@@ -448,21 +449,25 @@ model Enrollment {
    Reinforcement (entrevistas y examenes )
    =========================== */
    model QuizQuestion {
-    id         String   @id @default(uuid())
-    classId    String
-    text       String   @db.Text
-    type       String
-    options    Json?
-    createdAt  DateTime @default(now())
-    lastUsedAt DateTime?
-
-    // Relación con Classes
-    class      Classes  @relation(fields: [classId], references: [id], onDelete: Cascade)
-    @@index([classId])
-    @@index([createdAt])
-    @@index([lastUsedAt])
-    @@map("quiz_questions")
-  }
+  id            String   @id @default(uuid())
+  courseId      String
+  text          String   @db.Text
+  type          String
+  options       Json?
+  signature     String   @unique
+  tokensGenerated Int?
+  uses          Int?     @default(0)
+  status        String?
+  topic         String?
+  difficulty    String?
+  createdAt     DateTime @default(now())
+  lastUsedAt    DateTime?
+  course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  @@index([courseId])
+  @@index([createdAt])
+  @@index([lastUsedAt])
+  @@map("quiz_questions")
+}
 
   model InterviewQuestion {
     id         String   @id @default(uuid())
