@@ -36,15 +36,12 @@ export class GetOrGenerateQuestionUseCase {
     return false;
   }
 
-  async execute(input: { prompt: string; examId?: string; courseId?: string; userId?: string }): Promise<{ id: string; question: string; cached: boolean }> {
+  async execute(input: { prompt: string; courseId?: string; userId?: string }): Promise<{ id: string; question: string; cached: boolean }> {
     if (!input.prompt || !input.prompt.trim()) throw new Error('Prompt requerido');
     const now = new Date();
     const signature = createSignature({ text: input.prompt });
-
-    const courseId = input.courseId ?? input.examId;
-    if (!courseId) {
-      throw new Error('No hay documentos para generar preguntas: falta courseId (examId)');
-    }
+    const courseId = input.courseId;
+    if (!courseId) throw new Error('No hay documentos para generar preguntas: falta courseId');
 
     const existing = await this.repo.findBySignature(signature);
     if (existing && existing.lastUsedAt && (now.getTime() - existing.lastUsedAt.getTime()) <= this.ttlMs) {
@@ -104,15 +101,6 @@ export class GetOrGenerateQuestionUseCase {
       }
     }
 
-    if (!this.getDocumentsBySubjectUseCase) {
-      console.warn('GetDocumentsBySubjectUseCase no inyectado — se intentará usar chunks directos por documento');
-    } else {
-      const docsResp = await this.getDocumentsBySubjectUseCase.execute({ materiaId: courseId, page: 1, limit: 100 });
-      if (!docsResp || !docsResp.docs || docsResp.total === 0) {
-        throw new Error(`No hay documentos para generar preguntas (courseId=${courseId})`);
-      }
-    }
-
     let docIds: string[] = [];
     if (this.getDocumentsBySubjectUseCase) {
       const docsResp = await this.getDocumentsBySubjectUseCase.execute({ materiaId: courseId, page: 1, limit: 10 });
@@ -125,9 +113,7 @@ export class GetOrGenerateQuestionUseCase {
     const chunksResults = await Promise.all(chunkPromises);
     const allChunks = chunksResults.flatMap(r => (r && Array.isArray((r as any).chunks) ? (r as any).chunks : []));
 
-    if (!allChunks || allChunks.length === 0) {
-      throw new Error(`No hay documentos procesables (no hay chunks con texto) para courseId=${courseId}`);
-    }
+    if (!allChunks || allChunks.length === 0) throw new Error(`No hay documentos procesables para courseId=${courseId}`);
 
     const chunkTexts = allChunks.map((c: any) => c.content);
     const contextText = chunkTexts.join('\n').slice(0, 3000);
@@ -153,9 +139,7 @@ export class GetOrGenerateQuestionUseCase {
       }
     }
 
-    if (!generatedQuestionText || (generatedOptions && this.isFallbackOptions(generatedQuestionText, generatedOptions))) {
-      throw new Error('No se pudo generar una pregunta válida');
-    }
+    if (!generatedQuestionText || (generatedOptions && this.isFallbackOptions(generatedQuestionText, generatedOptions))) throw new Error('No se pudo generar una pregunta válida');
 
     const toSave: any = {
       id: undefined,

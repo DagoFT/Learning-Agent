@@ -10,12 +10,12 @@ export class ExamsChatController {
   ) {}
 
   @Post('generate-question')
-  async generateQuestion(@Body() body: { prompt: string; examId?: string; userId?: string }) {
-    return this.getOrGenerateQuestionUseCase.execute({ prompt: body.prompt, examId: body.examId, userId: body.userId });
+  async generateQuestion(@Body() body: { prompt: string; courseId?: string; userId?: string }) {
+    return this.getOrGenerateQuestionUseCase.execute({ prompt: body.prompt, courseId: body.courseId, userId: body.userId });
   }
 
   @Post('generate-options')
-  async generateOptions(@Body() body: { questionId?: string; prompt?: string; examId?: string; userId?: string }) {
-    return this.generateOptionsUseCase.execute({ questionId: body.questionId, prompt: body.prompt, examId: body.examId, userId: body.userId });
+  async generateOptions(@Body() body: { questionId?: string; prompt?: string; courseId?: string; userId?: string }) {
+    return this.generateOptionsUseCase.execute({ questionId: body.questionId, prompt: body.prompt, courseId: body.courseId, userId: body.userId });
   }
 }

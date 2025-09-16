@@ -455,11 +455,6 @@ model Enrollment {
   type          String
   options       Json?
   signature     String   @unique
-  tokensGenerated Int?
-  uses          Int?     @default(0)
-  status        String?
-  topic         String?
-  difficulty    String?
   createdAt     DateTime @default(now())
   lastUsedAt    DateTime?
   course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
