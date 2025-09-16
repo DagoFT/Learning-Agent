@@ -1,4 +1,3 @@
-// domain/entities/question.entity.ts
 import { v4 as uuidv4 } from 'uuid';
 
 export type QuestionStatus = 'generated' | 'invalid' | 'published';

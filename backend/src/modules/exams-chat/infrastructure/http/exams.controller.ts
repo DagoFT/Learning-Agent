@@ -1,4 +1,3 @@
-// infrastructure/http/exams.controller.ts
 import { Controller, Post, Body } from '@nestjs/common';
 import { GenerateOptionsForQuestionUseCase } from '../../application/usecases/generate-options-for-question.usecase';
 import { GetOrGenerateQuestionUseCase } from '../../application/usecases/get-or-generate-question.usecase';

@@ -1,4 +1,3 @@
-// application/usecases/publish-generate-question.usecase.ts
 import { Inject, Injectable } from '@nestjs/common';
 import { Question } from '../../domain/entities/question.entity';
 import type { QuestionRepositoryPort } from '../../domain/ports/question-repository.port';

@@ -11,6 +11,8 @@ import { InMemoryMetricsService } from './infrastructure/persistance/in-memory-m
 import { DeepseekModule } from '../deepseek/deepseek.module';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { DocumentsModule } from '../repository_documents/documents.module';
+import { PrismaDocumentChunkRepositoryAdapter } from '../repository_documents/infrastructure/persistence/prisma-document-chunk-repository.adapter';
+import { DOCUMENT_CHUNK_REPOSITORY_PORT } from '../repository_documents/tokens';
 
 @Module({
   imports: [DeepseekModule, PrismaModule, DocumentsModule],
@@ -18,6 +20,7 @@ import { DocumentsModule } from '../repository_documents/documents.module';
   providers: [
     { provide: EXAM_AI_GENERATOR, useClass: AIQuestionGenerator },
     { provide: EXAM_QUESTION_REPO, useClass: PrismaQuestionRepositoryAdapter },
+    { provide: DOCUMENT_CHUNK_REPOSITORY_PORT, useClass: PrismaDocumentChunkRepositoryAdapter },
     { provide: 'AUDIT_REPO', useClass: PrismaAuditRepositoryAdapter },
     { provide: 'METRICS_SERVICE', useClass: InMemoryMetricsService },
     GenerateOptionsForQuestionUseCase,

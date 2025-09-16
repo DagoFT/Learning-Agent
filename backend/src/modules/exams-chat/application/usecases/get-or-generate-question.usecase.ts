@@ -7,6 +7,7 @@ import { createSignature } from '../../utils/createSignature';
 import { EXAM_AI_GENERATOR, EXAM_QUESTION_REPO } from '../../tokens';
 import { DOCUMENT_CHUNK_REPOSITORY_PORT } from 'src/modules/repository_documents/tokens';
 import type { DocumentChunkRepositoryPort } from 'src/modules/repository_documents/domain/ports/document-chunk-repository.port';
+import { GetDocumentsBySubjectUseCase } from 'src/modules/repository_documents/application/queries/get-documents-by-subject.usecase';
 
 @Injectable()
 export class GetOrGenerateQuestionUseCase {
@@ -22,10 +23,11 @@ export class GetOrGenerateQuestionUseCase {
     @Inject('AUDIT_REPO') private readonly audit: AuditRepository,
     @Inject('METRICS_SERVICE') private readonly metrics: QuestionMetricsService,
     @Inject(DOCUMENT_CHUNK_REPOSITORY_PORT) private readonly docChunks: DocumentChunkRepositoryPort,
+    private readonly getDocumentsBySubjectUseCase?: GetDocumentsBySubjectUseCase,
   ) {}
 
   private isFallbackOptions(questionText: string, options: string[] | null | undefined): boolean {
-    if (!options || options.length < 4) return true;
+    if (!options || options.length < 2) return true;
     const joined = options.join(' ').toLowerCase();
     const q = (questionText || '').toLowerCase();
     const simpleFallback = options.every(o => o.toLowerCase().includes(q) || o.toLowerCase().startsWith(q) || o.includes('— opción'));
@@ -34,10 +36,15 @@ export class GetOrGenerateQuestionUseCase {
     return false;
   }
 
-  async execute(input: { prompt: string; examId?: string; userId?: string }): Promise<{ id: string; question: string; cached: boolean }> {
+  async execute(input: { prompt: string; examId?: string; courseId?: string; userId?: string }): Promise<{ id: string; question: string; cached: boolean }> {
     if (!input.prompt || !input.prompt.trim()) throw new Error('Prompt requerido');
     const now = new Date();
     const signature = createSignature({ text: input.prompt });
+
+    const courseId = input.courseId ?? input.examId;
+    if (!courseId) {
+      throw new Error('No hay documentos para generar preguntas: falta courseId (examId)');
+    }
 
     const existing = await this.repo.findBySignature(signature);
     if (existing && existing.lastUsedAt && (now.getTime() - existing.lastUsedAt.getTime()) <= this.ttlMs) {
@@ -47,7 +54,7 @@ export class GetOrGenerateQuestionUseCase {
         questionId: existing.id,
         timestamp: now,
         userId: input.userId,
-        examId: input.examId,
+        examId: courseId,
         signature,
         source: 'cached',
         tokensUsed: existing.tokensGenerated,
@@ -58,17 +65,17 @@ export class GetOrGenerateQuestionUseCase {
     }
 
     const allQuestions = await this.repo.findAll();
-    const totalQuestions = allQuestions.length;
+    const questionsForCourse = allQuestions.filter(q => q.examId === courseId);
+    const totalQuestionsForCourse = questionsForCourse.length;
 
-    const classCandidates = input.examId ? allQuestions.filter(q => q.examId === input.examId) : [];
-    if (classCandidates.length > 0 && Math.random() < this.chanceUseExisting) {
-      const pick = classCandidates[Math.floor(Math.random() * classCandidates.length)];
+    if (questionsForCourse.length > 0 && Math.random() < this.chanceUseExisting) {
+      const pick = questionsForCourse[Math.floor(Math.random() * questionsForCourse.length)];
       await this.repo.incrementUsage(pick.id, 0);
       await this.audit.record({
         questionId: pick.id,
         timestamp: now,
         userId: input.userId,
-        examId: input.examId,
+        examId: courseId,
         signature: pick.signature ?? signature,
         source: 'cached',
         tokensUsed: pick.tokensGenerated,
@@ -78,15 +85,15 @@ export class GetOrGenerateQuestionUseCase {
       return { id: pick.id, question: pick.text, cached: true };
     }
 
-    if (totalQuestions >= this.minQuestionsForDbChoice) {
-      if (totalQuestions >= this.maxStoredQuestions || Math.random() < this.dbChance) {
-        const pick = allQuestions[Math.floor(Math.random() * allQuestions.length)];
+    if (totalQuestionsForCourse >= this.minQuestionsForDbChoice) {
+      if (totalQuestionsForCourse >= this.maxStoredQuestions || Math.random() < this.dbChance) {
+        const pick = questionsForCourse[Math.floor(Math.random() * questionsForCourse.length)];
         await this.repo.incrementUsage(pick.id, 0);
         await this.audit.record({
           questionId: pick.id,
           timestamp: now,
           userId: input.userId,
-          examId: input.examId,
+          examId: courseId,
           signature: pick.signature ?? signature,
           source: 'cached',
           tokensUsed: pick.tokensGenerated,
@@ -97,12 +104,32 @@ export class GetOrGenerateQuestionUseCase {
       }
     }
 
-    if (!input.examId) throw new Error('No hay documentos para generar preguntas');
+    if (!this.getDocumentsBySubjectUseCase) {
+      console.warn('GetDocumentsBySubjectUseCase no inyectado — se intentará usar chunks directos por documento');
+    } else {
+      const docsResp = await this.getDocumentsBySubjectUseCase.execute({ materiaId: courseId, page: 1, limit: 100 });
+      if (!docsResp || !docsResp.docs || docsResp.total === 0) {
+        throw new Error(`No hay documentos para generar preguntas (courseId=${courseId})`);
+      }
+    }
 
-    const chunksResult = await this.docChunks.findByDocumentId(input.examId, { limit: 10, orderBy: 'chunkIndex', orderDirection: 'asc' });
-    if (!chunksResult || (chunksResult.total ?? 0) === 0) throw new Error('No hay documentos para generar preguntas');
+    let docIds: string[] = [];
+    if (this.getDocumentsBySubjectUseCase) {
+      const docsResp = await this.getDocumentsBySubjectUseCase.execute({ materiaId: courseId, page: 1, limit: 10 });
+      docIds = docsResp.docs.map(d => d.id).slice(0, 5);
+    } else {
+      docIds = [courseId];
+    }
 
-    const chunkTexts = chunksResult.chunks.map(c => c.content);
+    const chunkPromises = docIds.map(did => this.docChunks.findByDocumentId(did, { limit: 10, orderBy: 'chunkIndex', orderDirection: 'asc' }).catch(() => ({ chunks: [], total: 0 })));
+    const chunksResults = await Promise.all(chunkPromises);
+    const allChunks = chunksResults.flatMap(r => (r && Array.isArray((r as any).chunks) ? (r as any).chunks : []));
+
+    if (!allChunks || allChunks.length === 0) {
+      throw new Error(`No hay documentos procesables (no hay chunks con texto) para courseId=${courseId}`);
+    }
+
+    const chunkTexts = allChunks.map((c: any) => c.content);
     const contextText = chunkTexts.join('\n').slice(0, 3000);
     const promptWithContext = `${input.prompt}\n\nBasado en el siguiente contenido:\n${contextText}`;
 
@@ -116,6 +143,7 @@ export class GetOrGenerateQuestionUseCase {
       generatedQuestionText = (generated as any).questionText ?? (generated as any).question ?? '';
       tokensUsed = (generated as any).tokensUsed ?? 0;
       if (!generatedQuestionText || !generatedQuestionText.trim()) continue;
+
       if (typeof (this.iaClient as any).generateOptions === 'function') {
         const opts = await (this.iaClient as any).generateOptions(generatedQuestionText);
         generatedOptions = opts?.options ?? null;
@@ -132,11 +160,11 @@ export class GetOrGenerateQuestionUseCase {
     const toSave: any = {
       id: undefined,
       text: generatedQuestionText,
-      type: 'open_analysis',
+      type: generatedOptions && generatedOptions.length === 2 ? 'true_false' : 'multiple_choice',
       options: generatedOptions ?? null,
       status: 'generated',
-      signature,
-      examId: input.examId ?? null,
+      signature: createSignature({ text: generatedQuestionText, options: generatedOptions }),
+      examId: courseId,
       createdAt: now,
       lastUsedAt: undefined,
       tokensGenerated: tokensUsed ?? 0,
@@ -151,8 +179,8 @@ export class GetOrGenerateQuestionUseCase {
       questionId: saved.id,
       timestamp: now,
       userId: input.userId,
-      examId: input.examId,
-      signature,
+      examId: courseId,
+      signature: toSave.signature,
       source: 'generated',
       tokensUsed,
     });
